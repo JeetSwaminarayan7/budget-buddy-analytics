@@ -1,0 +1,14 @@
+# Kept in the project so it runs with no setup. dbt looks here first
+# when you run commands from the project folder.
+#
+# DuckDB is a database in a single file, so nothing needs installing
+# or paying for. The same models would run on Snowflake or BigQuery
+# by adding another target here.
+
+budget_buddy_analytics:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: budget_buddy.duckdb
+      threads: 4

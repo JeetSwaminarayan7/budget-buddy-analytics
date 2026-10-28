@@ -1,0 +1,92 @@
+version: 2
+
+models:
+  - name: fct_transactions
+    description: >
+      Every clean transaction, one row each. Built incrementally: new runs
+      only add rows loaded since the last run.
+    columns:
+      - name: transaction_id
+        data_tests: [unique, not_null]
+      - name: user_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_users')
+                field: user_id
+      - name: transaction_month
+        data_tests: [not_null]
+
+  - name: fct_monthly_category_spend
+    description: Spending per user, per month, per category. Money out only.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [user_id, transaction_month, category_name]
+    columns:
+      - name: spend_gbp
+        data_tests: [not_null, is_positive]
+
+  - name: fct_monthly_cashflow
+    description: Income, spending and net per user per month, and whether they hit their savings goal.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [user_id, transaction_month]
+    columns:
+      - name: net_gbp
+        description: income_gbp minus spend_gbp.
+      - name: savings_rate_pct
+        description: Share of the month's income that was left over.
+
+  - name: mart_budget_vs_actual
+    description: Each category budget a user set, against what they actually spent that month.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [user_id, budget_month, category_id]
+    columns:
+      - name: budget_status
+        description: "'over' if spending passed the budget, 'close' at 90% or more, otherwise 'under'."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [over, close, under]
+
+  - name: dim_users
+    description: One row per user, current settings plus activity summary.
+    columns:
+      - name: user_id
+        data_tests: [unique, not_null]
+
+unit_tests:
+  # Unit tests check the logic with made-up rows, without touching the real
+  # data. This one pins down where 'under', 'close' and 'over' start.
+  - name: budget_status_thresholds
+    model: mart_budget_vs_actual
+    given:
+      - input: ref('stg_budget_buddy__budgets')
+        rows:
+          - {user_id: 1, category_id: 10, budget_month: 2026-03-01, budget_gbp: 100}
+          - {user_id: 1, category_id: 11, budget_month: 2026-03-01, budget_gbp: 100}
+          - {user_id: 1, category_id: 12, budget_month: 2026-03-01, budget_gbp: 100}
+          - {user_id: 1, category_id: 13, budget_month: 2026-03-01, budget_gbp: 100}
+      - input: ref('stg_budget_buddy__categories')
+        rows:
+          - {category_id: 10, user_id: 1, category_name: Groceries}
+          - {category_id: 11, user_id: 1, category_name: Dining}
+          - {category_id: 12, user_id: 1, category_name: Transport}
+          - {category_id: 13, user_id: 1, category_name: Shopping}
+      - input: ref('fct_monthly_category_spend')
+        rows:
+          - {user_id: 1, transaction_month: 2026-03-01, category_id: 10, spend_gbp: 89.99}
+          - {user_id: 1, transaction_month: 2026-03-01, category_id: 11, spend_gbp: 90}
+          - {user_id: 1, transaction_month: 2026-03-01, category_id: 12, spend_gbp: 100.01}
+          # Nothing spent on Shopping that month
+    expect:
+      rows:
+        - {category_id: 10, actual_gbp: 89.99, budget_status: under}
+        - {category_id: 11, actual_gbp: 90, budget_status: close}
+        - {category_id: 12, actual_gbp: 100.01, budget_status: over}
+        - {category_id: 13, actual_gbp: 0, budget_status: under}

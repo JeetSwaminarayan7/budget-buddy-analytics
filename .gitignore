@@ -1,0 +1,16 @@
+# dbt build output
+target/
+dbt_packages/
+logs/
+
+# The DuckDB database is rebuilt by `dbt build`
+*.duckdb
+*.duckdb.wal
+
+# Python
+venv/
+.venv/
+__pycache__/
+
+.DS_Store
+.user.yml

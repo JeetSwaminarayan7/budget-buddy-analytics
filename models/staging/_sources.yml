@@ -1,0 +1,26 @@
+version: 2
+
+sources:
+  - name: budget_buddy
+    description: >
+      Raw exports from the Budget Buddy app's Postgres database, landed as
+      CSV files in data/raw. Every column is read as text, the way a raw
+      landing zone usually is, and cleaned up in staging.
+    tables:
+      - name: users
+        config:
+          meta:
+            external_location: "read_csv('data/raw/users.csv', header = true, all_varchar = true)"
+      - name: categories
+        config:
+          meta:
+            external_location: "read_csv('data/raw/categories.csv', header = true, all_varchar = true)"
+      - name: budgets
+        config:
+          meta:
+            external_location: "read_csv('data/raw/budgets.csv', header = true, all_varchar = true)"
+      - name: transactions
+        description: One file per export. The * picks up new files as they land.
+        config:
+          meta:
+            external_location: "read_csv('data/raw/transactions_*.csv', header = true, all_varchar = true, union_by_name = true)"

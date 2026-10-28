@@ -1,0 +1,29 @@
+name: budget_buddy_analytics
+version: "1.0.0"
+profile: budget_buddy_analytics
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+snapshot-paths: ["snapshots"]
+
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  budget_buddy_analytics:
+    # Staging: one view per raw table, light cleaning only
+    staging:
+      +materialized: view
+      +schema: staging
+    # Intermediate: joins and business logic that marts reuse
+    intermediate:
+      +materialized: view
+      +schema: intermediate
+    # Marts: tables people actually query
+    marts:
+      +materialized: table
+      +schema: marts
+
+snapshots:
+  budget_buddy_analytics:
+    +schema: snapshots

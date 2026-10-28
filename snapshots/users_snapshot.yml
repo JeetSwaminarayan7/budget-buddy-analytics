@@ -1,0 +1,12 @@
+snapshots:
+  # Keeps a history of user settings (Type 2 slowly changing dimension).
+  # When a user's updated_at moves, the old row gets a dbt_valid_to date
+  # and a new row is added, so you can see what their budget was at any
+  # point in time.
+  - name: users_snapshot
+    relation: ref('stg_budget_buddy__users')
+    description: History of every version of each user's settings.
+    config:
+      unique_key: user_id
+      strategy: timestamp
+      updated_at: updated_at

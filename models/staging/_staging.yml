@@ -1,0 +1,93 @@
+version: 2
+
+models:
+  - name: stg_budget_buddy__users
+    description: One row per app user, with types fixed and email lowercased.
+    columns:
+      - name: user_id
+        description: Primary key.
+        data_tests: [unique, not_null]
+      - name: email
+        data_tests: [unique, not_null]
+      - name: monthly_budget_gbp
+        description: Overall monthly spending limit the user set.
+        data_tests: [not_null, is_positive]
+      - name: savings_goal_gbp
+        data_tests: [not_null, is_positive]
+      - name: updated_at
+        description: Last time the user changed their settings. The snapshot uses this to spot changes.
+        data_tests: [not_null]
+
+  - name: stg_budget_buddy__categories
+    description: Spending categories. Each user gets their own copy of the defaults.
+    columns:
+      - name: category_id
+        data_tests: [unique, not_null]
+      - name: user_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_budget_buddy__users')
+                field: user_id
+      - name: category_name
+        data_tests: [not_null]
+
+  - name: stg_budget_buddy__budgets
+    description: Per-category monthly budgets.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [user_id, category_id, budget_month]
+    columns:
+      - name: category_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_budget_buddy__categories')
+                field: category_id
+      - name: budget_gbp
+        data_tests: [not_null, is_positive]
+
+  - name: stg_budget_buddy__transactions
+    description: >
+      One row per real transaction. Dates parsed from both formats the app
+      used, descriptions tidied, pound signs stripped, and duplicate rows
+      from re-uploaded statements removed.
+    columns:
+      - name: transaction_id
+        data_tests: [unique, not_null]
+      - name: user_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_budget_buddy__users')
+                field: user_id
+      - name: transaction_date
+        description: Null here would mean a date format the parser doesn't know.
+        data_tests: [not_null]
+      - name: amount_gbp
+        description: Always positive. Direction is in transaction_type.
+        data_tests: [not_null, is_positive]
+      - name: transaction_type
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [debit, credit]
+      - name: signed_amount_gbp
+        description: Positive for money in, negative for money out.
+      - name: category_id
+        description: Null when the user never categorised it.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_budget_buddy__categories')
+                field: category_id
+      - name: source
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [pdf, manual]

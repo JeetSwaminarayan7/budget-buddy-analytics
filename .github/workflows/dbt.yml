@@ -1,0 +1,34 @@
+name: dbt build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dbt
+        run: pip install -r requirements.txt
+
+      # Builds every model and runs every test on the raw data
+      - name: dbt build
+        run: dbt build
+
+      # Then lands October's data and changes two users, and builds again,
+      # so the incremental model and the snapshot are tested too
+      - name: Simulate a new day
+        run: python scripts/simulate_new_day.py
+
+      - name: dbt snapshot and build again
+        run: |
+          dbt snapshot
+          dbt build

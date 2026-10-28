@@ -1,0 +1,11 @@
+version: 2
+
+models:
+  - name: int_transactions_enriched
+    description: Transactions with their category name and month added.
+    columns:
+      - name: transaction_id
+        data_tests: [unique, not_null]
+      - name: category_name
+        description: The category, or 'Uncategorised' if the user never set one.
+        data_tests: [not_null]

@@ -11,7 +11,7 @@ with monthly as (
         sum(signed_amount_gbp)                                                 as net_gbp
 
     from {{ ref('fct_transactions') }}
-    group by all
+    group by user_id, transaction_month
 
 ),
 

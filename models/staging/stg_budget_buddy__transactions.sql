@@ -13,7 +13,7 @@ cleaned as (
         upper({{ clean_text('description') }})            as description,
         {{ parse_money('amount') }}                       as amount_gbp,
         lower(trim(type))                                 as transaction_type,
-        try_cast(nullif(trim(category_id), '') as integer) as category_id,
+        {{ to_integer_or_null('category_id') }}         as category_id,
         lower(trim(source))                               as source,
         cast(created_at as timestamp)                     as created_at
 

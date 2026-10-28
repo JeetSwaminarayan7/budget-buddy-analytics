@@ -2,6 +2,9 @@ version: 2
 
 sources:
   - name: budget_buddy
+    # On DuckDB the tables are read straight from the CSVs (external_location
+    # below). On BigQuery, scripts/load_to_bigquery.py loads them into this dataset.
+    schema: "{{ 'budget_buddy_raw' if target.type == 'bigquery' else 'main' }}"
     description: >
       Raw exports from the Budget Buddy app's Postgres database, landed as
       CSV files in data/raw. Every column is read as text, the way a raw

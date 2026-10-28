@@ -1,14 +1,26 @@
 # Kept in the project so it runs with no setup. dbt looks here first
 # when you run commands from the project folder.
 #
-# DuckDB is a database in a single file, so nothing needs installing
-# or paying for. The same models would run on Snowflake or BigQuery
-# by adding another target here.
+#   dbt build                    -> DuckDB, a local file, nothing to set up
+#   dbt build --target bigquery  -> Google BigQuery (see README)
 
 budget_buddy_analytics:
   target: dev
   outputs:
+
     dev:
       type: duckdb
-      path: budget_buddy.duckdb
+      path: "{{ env_var('DBT_DUCKDB_PATH', 'budget_buddy.duckdb') }}"
       threads: 4
+
+    bigquery:
+      type: bigquery
+      # Uses the login from `gcloud auth application-default login`
+      method: oauth
+      project: "{{ env_var('GCP_PROJECT', 'set-the-GCP_PROJECT-variable') }}"
+      dataset: budget_buddy
+      location: EU
+      threads: 4
+      job_execution_timeout_seconds: 300
+      # Stops a mistake from scanning more than 1 GB in one query
+      maximum_bytes_billed: 1000000000

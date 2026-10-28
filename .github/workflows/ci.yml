@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  dbt-duckdb:
+    name: dbt build (DuckDB)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dbt
+        run: pip install -r requirements.txt
+
+      # Builds every model and runs every test on the raw data
+      - name: dbt build
+        run: dbt build
+
+      # Then lands October's data and changes two users, and builds again,
+      # so the incremental model and the snapshot are tested too
+      - name: Simulate a new day
+        run: python scripts/simulate_new_day.py
+
+      - name: dbt snapshot and build again
+        run: |
+          dbt snapshot
+          dbt build
+
+  dbt-bigquery:
+    name: dbt parse (BigQuery)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Checks the project is valid for BigQuery. Doesn't connect to Google.
+      - name: dbt parse --target bigquery
+        env:
+          GCP_PROJECT: ci-check
+        run: |
+          pip install dbt-core==1.12.6 dbt-bigquery
+          dbt parse --target bigquery
+
+  airflow:
+    name: Airflow DAG run
+    runs-on: ubuntu-latest
+    env:
+      AIRFLOW_HOME: ${{ github.workspace }}/.airflow
+      AIRFLOW__CORE__DAGS_FOLDER: ${{ github.workspace }}/airflow/dags
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      DBT_BIN: ${{ github.workspace }}/.dbt-venv/bin/dbt
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Airflow and dbt (separate environments)
+        run: |
+          pip install "apache-airflow==3.3.2" duckdb \
+            --constraint https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt
+          python -m venv .dbt-venv
+          .dbt-venv/bin/pip install -r requirements.txt
+
+      - name: Check the DAG imports
+        run: |
+          airflow db migrate
+          airflow dags list-import-errors | tee import_errors.txt
+          grep -q "No data found" import_errors.txt
+
+      # Runs the whole DAG once, every task, without the scheduler
+      - name: Run the DAG
+        run: |
+          airflow dags test budget_buddy_daily 2026-10-28 2>&1 | tee dag_run.log
+          grep -q "DagRun Finished.*state=success" dag_run.log
+
+  airflow-image:
+    name: Airflow Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker compose build
+        run: docker compose -f airflow/docker-compose.yml build

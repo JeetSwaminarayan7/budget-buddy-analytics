@@ -5,7 +5,7 @@ with by_category as (
 
     select user_id, transaction_month, sum(spend_gbp) as spend_gbp
     from {{ ref('fct_monthly_category_spend') }}
-    group by all
+    group by user_id, transaction_month
 
 )
 

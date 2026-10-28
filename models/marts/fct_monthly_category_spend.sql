@@ -10,4 +10,4 @@ select
 
 from {{ ref('fct_transactions') }}
 where transaction_type = 'debit'
-group by all
+group by user_id, transaction_month, category_id, category_name

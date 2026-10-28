@@ -2,7 +2,7 @@
 
 A dbt project that turns raw exports from [Budget Buddy](https://github.com/JeetSwaminarayan7/budget-buddy), my personal finance app, into clean tables for reporting: monthly spending by category, budget against actual, and cash flow against savings goals.
 
-It runs on DuckDB, a database that lives in one file, so there's nothing to install beyond Python and nothing to pay for. The same models would run on Snowflake or BigQuery with a different profile.
+It runs on DuckDB by default, a database that lives in one file, so there's nothing to install beyond Python and nothing to pay for. The same models also run on Google BigQuery, and an Airflow DAG runs the whole thing every morning.
 
 ## The data
 
@@ -117,13 +117,118 @@ git checkout -- data/ && git clean -fd data/
 rm budget_buddy.duckdb
 ```
 
+## Running it every day with Airflow
+
+`airflow/dags/budget_buddy_daily.py` is a DAG that runs at 06:00 London time every day:
+
+```
+land_new_exports → check_raw_files → dbt_build_staging → dbt_build_marts → summarise
+```
+
+| Task | What it does |
+|---|---|
+| `land_new_exports` | Moves any new files from `data/incoming/` into `data/raw/`, standing in for a nightly export from the app |
+| `check_raw_files` | Counts rows in each raw file and fails the run straight away if one is missing or empty |
+| `dbt_build_staging` | `dbt build --select path:models/staging`: builds and tests the staging models |
+| `dbt_build_marts` | `dbt build --exclude path:models/staging`: builds and tests everything after that, snapshot included |
+| `summarise` | Reads the marts and logs this month's numbers: budgets over, users who hit their savings goal |
+
+A few choices worth knowing about:
+
+- **dbt is split into two tasks by layer.** If bad raw data fails a staging test, the marts task never starts, so dashboards keep yesterday's good data, and the Airflow UI shows exactly which layer broke.
+- **Each task retries twice, five minutes apart**, which covers things like a database being briefly unavailable.
+- **`max_active_runs=1`**, because DuckDB is a single file only one process can write to at a time.
+- **dbt runs from its own virtualenv** (`DBT_BIN`), not Airflow's. Both tools install a lot of packages and keeping them apart means upgrading one can't break the other.
+- **`catchup=False`**, so turning the DAG on doesn't try to run every day since the start date.
+- **The `dbt_target` param** lets you trigger a run against BigQuery from the UI instead of DuckDB.
+
+### Starting Airflow
+
+You need Docker Desktop. On Linux, run `echo "AIRFLOW_UID=$(id -u)" > airflow/.env` first so files Airflow writes belong to you.
+
+```bash
+cd airflow
+docker compose up --build
+```
+
+The first build takes a few minutes. When the logs settle, open http://localhost:8080. There's no login, because this is only for your own machine.
+
+Find `budget_buddy_daily`, switch it on, and press the play button to trigger a run. Click into the run to see each task go green, and click a task then "Logs" to see the dbt output. The `summarise` task's return value shows up under XCom.
+
+`docker compose down` stops it.
+
+Things to try:
+
+- Trigger it twice. The second run lands nothing new, and `fct_transactions` adds no rows.
+- Put a bad row in a raw file, for example change a transaction's `type` to `refund`. `dbt_build_staging` fails on the `accepted_values` test, retries twice over ten minutes, and `dbt_build_marts` never runs. Fix the row and clear the task to rerun it.
+
+## Running on BigQuery
+
+The same models run on Google BigQuery with `--target bigquery`. The free [BigQuery sandbox](https://cloud.google.com/bigquery/docs/sandbox) is enough: no card needed, 10 GB of storage and 1 TB of queries a month.
+
+### How the same SQL works on both
+
+Most SQL is the same on DuckDB and BigQuery, but a few functions aren't. Parsing a date is `try_strptime` on DuckDB and `safe.parse_date` on BigQuery, for example. `macros/cleaning.sql` handles this with `adapter.dispatch`: each macro has a `duckdb__` and a `bigquery__` version, and dbt picks the right one for the target. The models only ever call the plain name.
+
+`fct_transactions` also gets two BigQuery-only settings:
+
+- **Partitioned by month** on `transaction_date`. BigQuery charges by data scanned, and a query filtered to March only reads March's partition.
+- **Clustered by `user_id`**, so one user's rows sit together and queries for one user scan less.
+
+On BigQuery it loads new rows with `MERGE`; on DuckDB with delete-and-insert.
+
+### Setting it up
+
+1. Go to [console.cloud.google.com/bigquery](https://console.cloud.google.com/bigquery), sign in with a Google account, and create a project. Note its project id.
+2. Install the Google Cloud CLI ([instructions](https://cloud.google.com/sdk/docs/install)) and log in:
+   ```bash
+   gcloud auth application-default login
+   ```
+3. Install the BigQuery pieces and point everything at your project:
+   ```bash
+   pip install dbt-bigquery google-cloud-bigquery
+   export GCP_PROJECT=your-project-id        # Windows: set GCP_PROJECT=your-project-id
+   ```
+4. Load the raw CSVs into a `budget_buddy_raw` dataset:
+   ```bash
+   python scripts/load_to_bigquery.py
+   ```
+5. Build:
+   ```bash
+   dbt debug --target bigquery
+   dbt build --target bigquery
+   ```
+
+dbt creates `staging`, `intermediate`, `marts` and `snapshots` datasets in your project. Open the BigQuery console to query them, and look at `fct_transactions`' details tab to see the partitioning.
+
+### The sandbox can't run MERGE
+
+The sandbox doesn't allow `INSERT`, `UPDATE`, `DELETE` or `MERGE`. The first build works, because it only creates tables. Rebuilding the incremental model or the snapshot after that needs `MERGE`, so in the sandbox:
+
+```bash
+python scripts/simulate_new_day.py
+python scripts/load_to_bigquery.py
+dbt build --target bigquery --full-refresh --exclude users_snapshot
+```
+
+`--full-refresh` rebuilds `fct_transactions` from scratch instead of merging. To see real incremental loads and snapshot history on BigQuery, link a billing account to the project. This project's queries are a few megabytes, well inside the free 1 TB a month. Sandbox tables also delete themselves after 60 days.
+
 ## CI
 
-`.github/workflows/dbt.yml` runs on every push: `dbt build`, then the new-day script, then `dbt snapshot` and `dbt build` again, so the incremental path and the snapshot are tested as well as a fresh build.
+`.github/workflows/ci.yml` runs four jobs on every push:
+
+- **dbt build (DuckDB):** a fresh `dbt build`, then the new-day script, then `dbt snapshot` and `dbt build` again, so the incremental path and the snapshot are tested too
+- **dbt parse (BigQuery):** checks the project is valid for BigQuery, without connecting to Google
+- **Airflow DAG run:** installs Airflow, checks the DAG imports cleanly, and runs the whole DAG once with `airflow dags test`
+- **Airflow image:** checks the Docker image builds
 
 ## Layout
 
 ```
+├── airflow/
+│   ├── dags/budget_buddy_daily.py
+│   ├── Dockerfile
+│   └── docker-compose.yml
 ├── data/
 │   ├── raw/                 # landed exports (sources read these)
 │   └── incoming/            # October, not landed yet
@@ -135,7 +240,7 @@ rm budget_buddy.duckdb
 ├── snapshots/
 ├── tests/
 │   └── generic/
-├── scripts/                 # data generator and new-day simulator
+├── scripts/                 # data generator, new-day simulator, BigQuery loader
 ├── dbt_project.yml
-└── profiles.yml             # DuckDB connection, kept in the repo
+└── profiles.yml             # DuckDB and BigQuery connections, kept in the repo
 ```

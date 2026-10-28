@@ -17,7 +17,7 @@ select
     t.transaction_id,
     t.user_id,
     t.transaction_date,
-    date_trunc('month', t.transaction_date)::date     as transaction_month,
+    {{ month_start('t.transaction_date') }}          as transaction_month,
     t.description,
     t.transaction_type,
     t.amount_gbp,

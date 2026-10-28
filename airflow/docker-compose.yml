@@ -1,0 +1,28 @@
+# Airflow in one container, for running locally. `airflow standalone`
+# starts the scheduler, the web UI and everything else in one process.
+# Fine for learning; a real deployment runs each part separately.
+#
+#   cd airflow
+#   docker compose up --build
+#   open http://localhost:8080
+
+services:
+  airflow:
+    build:
+      context: ..
+      dockerfile: airflow/Dockerfile
+    command: standalone
+    ports:
+      - "8080:8080"
+    # On Linux, set AIRFLOW_UID to your own user id (see README) so files
+    # Airflow writes into the project folder belong to you
+    user: "${AIRFLOW_UID:-50000}:0"
+    environment:
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/budget-buddy-analytics/airflow/dags
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      # No login screen. Only ever do this on your own machine.
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+      BUDGET_BUDDY_DBT_DIR: /opt/budget-buddy-analytics
+    volumes:
+      # The whole repo, so the DAG can see the dbt project and its data
+      - ..:/opt/budget-buddy-analytics

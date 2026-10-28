@@ -1,9 +1,20 @@
+{#
+    incremental_strategy: BigQuery does incremental loads with MERGE.
+    DuckDB deletes the matching rows and inserts the new ones.
+
+    partition_by and cluster_by are only set on BigQuery.
+    Partitioning by month means a query for March reads March's data, not
+    the whole table, so it's faster and you pay for less. Clustering by
+    user keeps each user's rows next to each other.
+#}
 {{
     config(
         materialized = 'incremental',
         unique_key = 'transaction_id',
-        incremental_strategy = 'delete+insert',
-        on_schema_change = 'append_new_columns'
+        on_schema_change = 'append_new_columns',
+        incremental_strategy = 'merge' if target.type == 'bigquery' else 'delete+insert',
+        partition_by = {'field': 'transaction_date', 'data_type': 'date', 'granularity': 'month'} if target.type == 'bigquery' else none,
+        cluster_by = ['user_id'] if target.type == 'bigquery' else none
     )
 }}
 
